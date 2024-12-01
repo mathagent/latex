@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF LaTeX Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.17.359/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow-y: auto;
+            max-height: 400px;
+        }
+        #actions {
+            margin-top: 10px;
+        }
+        button, input[type="button"] {
+            margin-right: 10px;
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover, input[type="button"]:hover {
+            background-color: #45a049;
+        }
+        pre {
+            padding: 10px;
+            background: #f8f8f8;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>PDF LaTeX Converter</h1>
+    <p>Upload a PDF or enter a URL containing LaTeX equations. The content will be processed and rendered, with options to export the result in various formats.</p>
+    <input type="file" id="fileInput" accept="application/pdf">
+    <input type="text" id="urlInput" placeholder="Enter PDF URL">
+    <input type="button" id="loadUrlButton" value="Load PDF from URL">
+    <div id="progress"></div>
+    <div id="output"></div>
+    <div id="actions">
+        <button id="exportText">Export as Text</button>
+        <button id="exportHTML">Export as HTML</button>
+        <button id="exportMarkdown">Export as Markdown</button>
+    </div>
+    
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const urlInput = document.getElementById('urlInput');
+        const loadUrlButton = document.getElementById('loadUrlButton');
+        const output = document.getElementById('output');
+        const progress = document.getElementById('progress');
+        const exportTextBtn = document.getElementById('exportText');
+        const exportHTMLBtn = document.getElementById('exportHTML');
+        const exportMarkdownBtn = document.getElementById('exportMarkdown');
+        let extractedContent = "";
+
+        async function loadPdf(data) {
+            output.innerHTML = ""; // Clear previous content
+            extractedContent = "";
+            progress.textContent = "Loading PDF...";
+            
+            const pdf = await pdfjsLib.getDocument({ data }).promise;
+            progress.textContent = `PDF Loaded: ${pdf.numPages} page(s)`;
+
+            for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+                progress.textContent = `Processing page ${pageNumber} of ${pdf.numPages}...`;
+
+                const page = await pdf.getPage(pageNumber);
+                const viewport = page.getViewport({ scale: 1 });
+
+                // Render PDF page into canvas
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                await page.render({ canvasContext: context, viewport }).promise;
+
+                // Append canvas to output
+                output.appendChild(canvas);
+
+                // Extract text content and process LaTeX
+                const textContent = await page.getTextContent();
+                const rawText = textContent.items.map(item => item.str).join(' ');
+                extractedContent += rawText + "\n";
+
+                // Render LaTeX using MathJax
+                const mathContainer = document.createElement('div');
+                mathContainer.innerHTML = rawText.replace(/\$\$(.*?)\$\$/g, "<mathjax>$1</mathjax>");
+                MathJax.typesetPromise([mathContainer]);
+                output.appendChild(mathContainer);
+            }
+            progress.textContent = "Processing complete!";
+        }
+
+        fileInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const fileReader = new FileReader();
+                fileReader.onload = () => loadPdf(new Uint8Array(fileReader.result));
+                fileReader.readAsArrayBuffer(file);
+            }
+        });
+
+        loadUrlButton.addEventListener('click', async () => {
+            const url = urlInput.value;
+            if (url) {
+                progress.textContent = "Downloading PDF...";
+                const response = await fetch(url);
+                const arrayBuffer = await response.arrayBuffer();
+                loadPdf(new Uint8Array(arrayBuffer));
+            }
+        });
+
+        // Export functions
+        function downloadFile(filename, content) {
+            const element = document.createElement('a');
+            element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content));
+            element.setAttribute('download', filename);
+            document.body.appendChild(element);
+            element.click();
+            document.body.removeChild(element);
+        }
+
+        exportTextBtn.addEventListener('click', () => {
+            downloadFile('extracted-content.txt', extractedContent);
+        });
+
+        exportHTMLBtn.addEventListener('click', () => {
+            const htmlContent = `
+                <html>
+                <head>
+                    <title>Exported HTML</title>
+                </head>
+                <body>${output.innerHTML}</body>
+                </html>`;
+            downloadFile('extracted-content.html', htmlContent);
+        });
+
+        exportMarkdownBtn.addEventListener('click', () => {
+            const markdownContent = extractedContent
+                .replace(/\$\$(.*?)\$\$/g, "`$1`")
+                .replace(/^\s+/gm, ""); // Remove extra spaces
+            const highlighted = `<pre><code class="markdown">${markdownContent}</code></pre>`;
+            hljs.highlightAll();
+            downloadFile('extracted-content.md', highlighted);
+        });
+    </script>
+</body>
+</html>
