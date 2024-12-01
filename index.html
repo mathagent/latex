@@ -48,6 +48,34 @@
             border-radius: 5px;
             overflow-x: auto;
         }
+        #progress {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fff3cd;
+            color: #856404;
+            border-radius: 5px;
+        }
+        #error {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 5px;
+            display: none;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -57,6 +85,7 @@
     <input type="text" id="urlInput" placeholder="Enter PDF URL">
     <input type="button" id="loadUrlButton" value="Load PDF from URL">
     <div id="progress"></div>
+    <div id="error"></div>
     <div id="output"></div>
     <div id="actions">
         <button id="exportText">Export as Text</button>
@@ -69,7 +98,8 @@
         const urlInput = document.getElementById('urlInput');
         const loadUrlButton = document.getElementById('loadUrlButton');
         const output = document.getElementById('output');
-        const progress = document.getElementById('progress');
+        const progressDiv = document.getElementById('progress');
+        const errorDiv = document.getElementById('error');
         const exportTextBtn = document.getElementById('exportText');
         const exportHTMLBtn = document.getElementById('exportHTML');
         const exportMarkdownBtn = document.getElementById('exportMarkdown');
@@ -78,39 +108,52 @@
         async function loadPdf(data) {
             output.innerHTML = ""; // Clear previous content
             extractedContent = "";
-            progress.textContent = "Loading PDF...";
-            
-            const pdf = await pdfjsLib.getDocument({ data }).promise;
-            progress.textContent = `PDF Loaded: ${pdf.numPages} page(s)`;
+            progressDiv.textContent = "Loading PDF...";
+            errorDiv.style.display = 'none'; // Hide error message initially
+            const progressBar = document.createElement('div');
+            progressBar.classList.add('progress-bar');
+            const progressFill = document.createElement('div');
+            progressFill.classList.add('progress-bar-fill');
+            progressBar.appendChild(progressFill);
+            progressDiv.appendChild(progressBar);
 
-            for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-                progress.textContent = `Processing page ${pageNumber} of ${pdf.numPages}...`;
+            try {
+                const pdf = await pdfjsLib.getDocument({ data }).promise;
+                progressDiv.textContent = `PDF Loaded: ${pdf.numPages} page(s)`;
 
-                const page = await pdf.getPage(pageNumber);
-                const viewport = page.getViewport({ scale: 1 });
+                for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+                    progressDiv.textContent = `Processing page ${pageNumber} of ${pdf.numPages}...`;
+                    progressFill.style.width = `${(pageNumber / pdf.numPages) * 100}%`;
 
-                // Render PDF page into canvas
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                await page.render({ canvasContext: context, viewport }).promise;
+                    const page = await pdf.getPage(pageNumber);
+                    const viewport = page.getViewport({ scale: 1 });
 
-                // Append canvas to output
-                output.appendChild(canvas);
+                    // Render PDF page into canvas
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    await page.render({ canvasContext: context, viewport }).promise;
 
-                // Extract text content and process LaTeX
-                const textContent = await page.getTextContent();
-                const rawText = textContent.items.map(item => item.str).join(' ');
-                extractedContent += rawText + "\n";
+                    // Append canvas to output
+                    output.appendChild(canvas);
 
-                // Render LaTeX using MathJax
-                const mathContainer = document.createElement('div');
-                mathContainer.innerHTML = rawText.replace(/\$\$(.*?)\$\$/g, "<mathjax>$1</mathjax>");
-                MathJax.typesetPromise([mathContainer]);
-                output.appendChild(mathContainer);
+                    // Extract text content and process LaTeX
+                    const textContent = await page.getTextContent();
+                    const rawText = textContent.items.map(item => item.str).join(' ');
+                    extractedContent += rawText + "\n";
+
+                    // Render LaTeX using MathJax
+                    const mathContainer = document.createElement('div');
+                    mathContainer.innerHTML = rawText.replace(/\$\$(.*?)\$\$/g, "<mathjax>$1</mathjax>");
+                    MathJax.typesetPromise([mathContainer]);
+                    output.appendChild(mathContainer);
+                }
+                progressDiv.textContent = "Processing complete!";
+            } catch (error) {
+                errorDiv.style.display = 'block';
+                errorDiv.textContent = `Error processing PDF: ${error.message}`;
             }
-            progress.textContent = "Processing complete!";
         }
 
         fileInput.addEventListener('change', async (event) => {
@@ -125,10 +168,20 @@
         loadUrlButton.addEventListener('click', async () => {
             const url = urlInput.value;
             if (url) {
-                progress.textContent = "Downloading PDF...";
-                const response = await fetch(url);
-                const arrayBuffer = await response.arrayBuffer();
-                loadPdf(new Uint8Array(arrayBuffer));
+                progressDiv.textContent = "Downloading PDF...";
+                errorDiv.style.display = 'none'; // Hide error message initially
+
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`Failed to load PDF from URL: ${response.statusText}`);
+                    }
+                    const arrayBuffer = await response.arrayBuffer();
+                    loadPdf(new Uint8Array(arrayBuffer));
+                } catch (error) {
+                    errorDiv.style.display = 'block';
+                    errorDiv.textContent = `Error: ${error.message}`;
+                }
             }
         });
 
